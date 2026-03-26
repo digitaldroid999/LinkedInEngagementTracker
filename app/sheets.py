@@ -7,7 +7,6 @@ from typing import Any
 from datetime import datetime, timedelta
 
 import gspread
-from gspread.utils import ValueInputOption
 from google.oauth2.service_account import Credentials
 
 from app.config import (
@@ -245,29 +244,14 @@ class SheetsManager:
         ws.update_acell(f"{col_letter}{sheet_row}", value)
 
     def update_engagement_util_cell(self, sheet_row: int, header_name: str, value: str) -> None:
-        self.update_engagement_util_cells_batch(sheet_row, [(header_name, value)])
-
-    def update_engagement_util_cells_batch(
-        self, sheet_row: int, updates: list[tuple[str, str]]
-    ) -> None:
-        """One API request: set multiple cells on Profiles_Engagement_Util for the same row."""
-        if not updates:
-            return
         ws = self.profiles_engagement_util_ws()
         headers = ws.row_values(1)
         m = self._header_index_map(headers)
-        batch: list[dict[str, Any]] = []
-        for header_name, value in updates:
-            if value is None or str(value).strip() == "":
-                continue
-            k = _norm_header(header_name)
-            if k not in m:
-                continue
-            col_letter = _column_letter_index(m[k])
-            batch.append({"range": f"{col_letter}{sheet_row}", "values": [[value]]})
-        if not batch:
+        k = _norm_header(header_name)
+        if k not in m:
             return
-        ws.batch_update(batch, value_input_option=ValueInputOption.user_entered)
+        col_letter = _column_letter_index(m[k])
+        ws.update_acell(f"{col_letter}{sheet_row}", value)
 
     @staticmethod
     def _cell_str(row: list[str], i: int) -> str:

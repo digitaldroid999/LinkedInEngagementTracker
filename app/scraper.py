@@ -147,7 +147,7 @@ class EngagementScraper:
         self._exp_cache: dict[str, list[tuple[str, str | None]]] = {}
         self._current_label = ""
         self._stats = ScrapeStats()
-        self._pending_engagements: list[dict[str, Any]] = []
+        self._pending_engagement_records: list[dict[str, Any]] = []
 
     def _record_error(self, message: str) -> None:
         self._stats.errors.append(message)
@@ -282,7 +282,7 @@ class EngagementScraper:
                     profile_headline="",
                 )
             ]
-        self._pending_engagements.extend(rows)
+        self._pending_engagement_records.extend(rows)
         dedup.add(key)
         if engagement_type == "Comment":
             self._stats.new_comments += 1
@@ -291,11 +291,16 @@ class EngagementScraper:
         self._emit()
 
     def _flush_pending_engagements(self) -> None:
-        if not self._pending_engagements:
+        """Write queued Engagements rows in one API batch (per profile)."""
+        if not self._pending_engagement_records:
             return
-        batch = self._pending_engagements
-        self._pending_engagements = []
-        self._sheets.append_engagement_dicts(batch)
+        batch = list(self._pending_engagement_records)
+        self._pending_engagement_records.clear()
+        try:
+            self._sheets.append_engagement_dicts(batch)
+        except Exception:
+            self._pending_engagement_records.extend(batch)
+            raise
 
     def _process_stream(
         self,
@@ -478,45 +483,43 @@ class EngagementScraper:
         dedup: set[tuple[str, str, str]],
         util_sheet_row: int | None = None,
     ) -> None:
-        util_updates: list[tuple[str, str]] = []
-        self._pending_engagements.clear()
-        util_row: int | None = util_sheet_row
+        if self._stop_check and self._stop_check():
+            self._stats.stopped = True
+            return
+        util_row = util_sheet_row
+        if util_row is None:
+            util_row = self._sheets.find_engagement_util_sheet_row(pinfo.get("profile_url") or "")
+        username = linkedin_username_from_url(pinfo["profile_url"])
+        if not username:
+            self._record_error(f"No LinkedIn username in URL for row {pinfo.get('sheet_row')}")
+            return
+        urn = (pinfo.get("urn") or "").strip()
+        try:
+            data = _profile_data(self._api, username)
+            profile_urn = (data.get("urn") or "").strip()
+            profile_name = (data.get("full_name") or "").strip()
+            if profile_name:
+                engager_name = profile_name
+            if profile_urn:
+                urn = profile_urn
+                if util_row is not None:
+                    self._sheets.update_engagement_util_cell(util_row, "Urn", urn)
+        except LinkedInAPIError as e:
+            # If URN already exists on the sheet, continue with it.
+            if not urn:
+                self._record_error(f"Profile {username}: {e}")
+                return
+        if not urn:
+            self._record_error(f"Missing URN for {username}")
+            return
+
+        engager_url = pinfo["profile_url"].strip()
+        lc = parse_datetime(pinfo.get("last_commented"))
+        last_reacted_post_id = (pinfo.get("last_reacted_post_id") or "").strip()
+        cutoff = days_ago(90)
+        self._exp_cache.clear()
 
         try:
-            if self._stop_check and self._stop_check():
-                self._stats.stopped = True
-                return
-            if util_row is None:
-                util_row = self._sheets.find_engagement_util_sheet_row(pinfo.get("profile_url") or "")
-            username = linkedin_username_from_url(pinfo["profile_url"])
-            if not username:
-                self._record_error(f"No LinkedIn username in URL for row {pinfo.get('sheet_row')}")
-                return
-            urn = (pinfo.get("urn") or "").strip()
-            try:
-                data = _profile_data(self._api, username)
-                profile_urn = (data.get("urn") or "").strip()
-                profile_name = (data.get("full_name") or "").strip()
-                if profile_name:
-                    engager_name = profile_name
-                if profile_urn:
-                    urn = profile_urn
-                    if util_row is not None:
-                        util_updates.append(("Urn", urn))
-            except LinkedInAPIError as e:
-                if not urn:
-                    self._record_error(f"Profile {username}: {e}")
-                    return
-            if not urn:
-                self._record_error(f"Missing URN for {username}")
-                return
-
-            engager_url = pinfo["profile_url"].strip()
-            lc = parse_datetime(pinfo.get("last_commented"))
-            last_reacted_post_id = (pinfo.get("last_reacted_post_id") or "").strip()
-            cutoff = days_ago(90)
-            self._exp_cache.clear()
-
             try:
                 fc = self._process_stream(
                     self._api.iter_comment_pages(urn),
@@ -530,7 +533,9 @@ class EngagementScraper:
                     dedup,
                 )
                 if fc and util_row is not None:
-                    util_updates.append(("Last Commented Date", fc.date().isoformat()))
+                    self._sheets.update_engagement_util_cell(
+                        util_row, "Last Commented Date", fc.date().isoformat()
+                    )
             except LinkedInAPIError as e:
                 self._record_error(f"Comments {username}: {e}")
 
@@ -550,17 +555,13 @@ class EngagementScraper:
                         dedup,
                     )
                 if top_post_id and util_row is not None:
-                    util_updates.append(("Last Reacted Post ID", top_post_id))
+                    self._sheets.update_engagement_util_cell(
+                        util_row, "Last Reacted Post ID", top_post_id
+                    )
             except LinkedInAPIError as e:
                 self._record_error(f"Reactions {username}: {e}")
         finally:
             self._flush_pending_engagements()
-            if util_row is not None and util_updates:
-                try:
-                    self._sheets.update_engagement_util_cells_batch(util_row, util_updates)
-                except Exception as e:
-                    _log.warning("Profiles_Engagement_Util batch update failed: %s", e)
-            self._emit()
 
     def run(self) -> ScrapeStats:
         self._stats = ScrapeStats()
