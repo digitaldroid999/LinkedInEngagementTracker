@@ -86,7 +86,7 @@ def format_next_line(weekday: int, hour: int, minute: int) -> str:
 
 
 class ScrapeWorker(QThread):
-    progress = pyqtSignal(str, int, int)
+    progress = pyqtSignal(str, int, int, int, int)
     finished_ok = pyqtSignal(object)
     failed = pyqtSignal(str)
 
@@ -107,8 +107,8 @@ class ScrapeWorker(QThread):
             api = LinkedInAPIClient(key)
             sheets = SheetsManager(g)
 
-            def cb(name: str, nc: int, nr: int) -> None:
-                self.progress.emit(name, nc, nr)
+            def cb(name: str, nc: int, nr: int, idx: int, total: int) -> None:
+                self.progress.emit(name, nc, nr, idx, total)
 
             def should_stop() -> bool:
                 return self.isInterruptionRequested()
@@ -361,9 +361,20 @@ class MainWindow(QWidget):
         self._status_left.setText("")
         self._status_right.setText(format_next_line(wd, h, m))
 
-    def _refresh_status_running(self, name: str, nc: int, nr: int) -> None:
+    def _refresh_status_running(
+        self, name: str, nc: int, nr: int, idx: int = 0, total: int = 0
+    ) -> None:
         self._status_left.setText(f"Scraping: {name}")
         self._status_right.setText(f"Found: {nc} new comments, and {nr} new reactions")
+        if total > 0:
+            if idx > 0:
+                self._lbl_count.setText(
+                    f"Profiles in tracking: {self._profile_count} - {idx}/{total} in progress"
+                )
+            else:
+                self._lbl_count.setText(
+                    f"Profiles in tracking: {self._profile_count} - starting ({total} to scrape)"
+                )
 
     def _on_timer(self) -> None:
         if self._running:
@@ -409,7 +420,7 @@ class MainWindow(QWidget):
         self._btn_run.setEnabled(False)
         self._btn_run.setText("Running")
         self._btn_stop.setEnabled(True)
-        self._refresh_status_running("Starting…", 0, 0)
+        self._refresh_status_running("Starting…", 0, 0, 0, self._profile_count)
         self._worker = ScrapeWorker(self, silent=auto)
         self._worker.progress.connect(self._on_worker_progress)
         self._worker.finished_ok.connect(self._on_worker_done)
@@ -417,17 +428,20 @@ class MainWindow(QWidget):
         self._worker.finished.connect(self._on_worker_thread_finished)
         self._worker.start()
 
-    def _on_worker_progress(self, name: str, nc: int, nr: int) -> None:
-        self._refresh_status_running(name, nc, nr)
+    def _on_worker_progress(self, name: str, nc: int, nr: int, idx: int, total: int) -> None:
+        self._refresh_status_running(name, nc, nr, idx, total)
 
     def _on_worker_done(self, stats: Any) -> None:
         self._refresh_profile_count()
         s = stats if isinstance(stats, ScrapeStats) else ScrapeStats()
-        title = "Auto-scrape complete" if self._silent_completion else "Scrape complete"
+        if self._silent_completion:
+            title = "Auto-scrape stopped" if s.stopped else "Auto-scrape complete"
+        else:
+            title = "Scrape stopped" if s.stopped else "Scrape complete"
         if s.stopped:
             msg = (
-                "Scrape was stopped.\n\n"
-                f"New comments so far: {s.new_comments}, new reactions so far: {s.new_reactions}."
+                "Scrape was stopped after the profile that was in progress finished.\n\n"
+                f"New comments: {s.new_comments}, new reactions: {s.new_reactions}."
             )
         else:
             msg = f"Finished. New comments: {s.new_comments}, new reactions: {s.new_reactions}."
@@ -449,6 +463,7 @@ class MainWindow(QWidget):
         self._btn_run.setText("Run")
         self._btn_stop.setEnabled(False)
         self._worker = None
+        self._refresh_profile_count()
         self._refresh_status_idle()
 
     def closeEvent(self, event: QCloseEvent | None) -> None:
@@ -456,7 +471,7 @@ class MainWindow(QWidget):
             QMessageBox.warning(
                 self,
                 "Scraping in progress",
-                "A scraper is still running. Click Stop to cancel, or wait until it finishes before closing.",
+                "A scraper is still running. Stop waits for the current profile to finish, or wait until the run ends before closing.",
             )
             if event:
                 event.ignore()

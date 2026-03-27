@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 import requests
 
@@ -59,6 +59,7 @@ class LinkedInAPIClient:
         self._key = rapidapi_key
         self._max_retries = max_retries
         self._timeout = timeout
+        self._on_api_call: Callable[[], None] | None = None
         self._session = requests.Session()
         self._session.headers.update(
             {
@@ -81,6 +82,8 @@ class LinkedInAPIClient:
                     raise LinkedInAPIError("Invalid JSON (not an object)")
                 if js.get("success") is False and "message" in js:
                     raise LinkedInAPIError(str(js.get("message")))
+                if self._on_api_call is not None:
+                    self._on_api_call()
                 return js
             except (requests.RequestException, LinkedInAPIError, ValueError) as e:
                 last_err = e
@@ -104,6 +107,10 @@ class LinkedInAPIClient:
                 time.sleep(10)
         assert last_err is not None
         raise last_err
+
+    def set_api_call_hook(self, hook: Callable[[], None] | None) -> None:
+        """Invoked once after each successful HTTP response (one count per page for paginated endpoints)."""
+        self._on_api_call = hook
 
     def get_profile_by_username(self, username: str) -> dict[str, Any]:
         url = f"{RAPIDAPI_BASE}/user/profile"

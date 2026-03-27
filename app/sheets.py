@@ -1,13 +1,12 @@
 """Google Sheets access: profiles, engagements, hyperlinks."""
 
 from __future__ import annotations
-
+from datetime import datetime, timedelta
 import re
 from typing import Any
-from datetime import datetime, timedelta
 
-import gspread
 from google.oauth2.service_account import Credentials
+import gspread
 
 from app.config import (
     GOOGLE_SCOPES,
@@ -173,12 +172,8 @@ class SheetsManager:
                     break
         return {
             "sheet_row": row_idx + 2,
-            "profile_url": url,
             "display_name": col("name"),
-            # URN / comment / reaction bookmarks live on Profiles_Engagement_Util, not Profiles.
-            "urn": "",
-            "last_commented": "",
-            "last_reacted_post_id": "",
+            "profile_url": url,
         }
 
     def append_engagement_rows(self, rows: list[list[Any]]) -> dict[str, Any] | None:
@@ -233,16 +228,6 @@ class SheetsManager:
         if to_notes:
             self.engagements_ws().insert_notes(to_notes)
 
-    def update_profile_cell(self, sheet_row: int, header_name: str, value: str) -> None:
-        ws = self.profile_ws()
-        headers = ws.row_values(1)
-        m = self._header_index_map(headers)
-        k = _norm_header(header_name)
-        if k not in m:
-            return
-        col_letter = _column_letter_index(m[k])
-        ws.update_acell(f"{col_letter}{sheet_row}", value)
-
     def update_engagement_util_cell(self, sheet_row: int, header_name: str, value: str) -> None:
         ws = self.profiles_engagement_util_ws()
         headers = ws.row_values(1)
@@ -269,7 +254,8 @@ class SheetsManager:
     ) -> tuple[set[str], dict[str, int], dict[str, dict[str, str]]]:
         """
         Scan Profiles_Engagement_Util: normalized profile URL keys, 1-based sheet row per key,
-        and per-row fields used as scrape state (urn, last_commented, last_reacted_post_id).
+        and per-row fields used as scrape state (urn, last_commented, last_reacted_post_id,
+        number_of_api_calls).
         """
         ws = self.profiles_engagement_util_ws()
         rows = ws.get_all_values(value_render_option="FORMULA")
@@ -295,6 +281,7 @@ class SheetsManager:
         i_urn = col_idx("urn")
         i_lc = col_idx("last commented date")
         i_lr = col_idx("last reacted post id")
+        i_api = col_idx("number of api calls")
 
         keys: set[str] = set()
         row_by_key: dict[str, int] = {}
@@ -317,6 +304,8 @@ class SheetsManager:
                 fd["last_commented"] = self._cell_str(r, i_lc)
             if i_lr is not None:
                 fd["last_reacted_post_id"] = self._cell_str(r, i_lr)
+            if i_api is not None:
+                fd["number_of_api_calls"] = self._cell_str(r, i_api)
             fields_by_key[k] = fd
         return keys, row_by_key, fields_by_key
 
@@ -345,8 +334,10 @@ class SheetsManager:
                 n += 1
         return n
 
-    def append_profiles_engagement_util_row(self, name: str, profile_url: str) -> int | None:
-        """Append Name and LinkedIn Profile on Profiles_Engagement_Util (row 1 = headers)."""
+    def append_profiles_engagement_util_row(
+        self, name: str, profile_url: str, urn: str | None = None
+    ) -> int | None:
+        """Append Name, LinkedIn Profile, and optional Urn on Profiles_Engagement_Util (row 1 = headers)."""
         ws = self.profiles_engagement_util_ws()
         headers = ws.row_values(1)
         if not headers:
@@ -365,6 +356,8 @@ class SheetsManager:
                 break
         if not url_set:
             return None
+        if urn and "urn" in m:
+            row[m["urn"]] = urn.strip()
         res = ws.append_rows([row], value_input_option="USER_ENTERED")
         return self._first_row_from_append_response(res)
 
@@ -402,8 +395,8 @@ class SheetsManager:
             "Engagement Type": engagement_type,
             "Poster Type": poster_type,
             "Poster Name": poster_cell,
-            # "Engagement Date": engagement_date,
-            "Post Date": engagement_date,  # backward-compat if old header still exists
+            "Engagement Date": engagement_date,
+            "Post Date": engagement_date,
             "Post Link": post_link,
             "Scrape Date": scrape_date,
             "Current Company": company_cell,

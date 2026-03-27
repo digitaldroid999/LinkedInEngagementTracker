@@ -51,40 +51,16 @@ def parse_datetime(value: Any) -> datetime | None:
         return None
 
 
-def parse_date(value: Any) -> date | None:
-    if value is None:
-        return None
-    if isinstance(value, date) and not isinstance(value, datetime):
-        return value
-    if isinstance(value, datetime):
-        return value.date()
-    if isinstance(value, (int, float)):
-        ts = float(value)
-        # Handle epoch milliseconds and seconds.
-        if ts > 10_000_000_000:
-            ts = ts / 1000.0
-        try:
-            return datetime.fromtimestamp(ts).date()
-        except (ValueError, OSError, OverflowError):
-            return None
-    s = str(value).strip()
-    if not s:
-        return None
-    if re.match(r"^\d{4}-\d{2}-\d{2}$", s):
-        return date.fromisoformat(s)
-    if re.match(r"^\d{10,13}$", s):
-        try:
-            ts = float(s)
-            if len(s) >= 13:
-                ts = ts / 1000.0
-            return datetime.fromtimestamp(ts).date()
-        except (ValueError, OSError, OverflowError):
-            return None
-    try:
-        return date_parser.parse(s).date()
-    except (ValueError, TypeError, OverflowError):
-        return None
-
-
 def days_ago(n: int) -> date:
     return (datetime.now() - timedelta(days=n)).date()
+
+
+def format_sheet_datetime(dt: datetime) -> str:
+    """ISO 8601 datetime string for Sheets (includes time-of-day, not date-only)."""
+    dt = _to_naive_utc(dt)
+    return dt.replace(microsecond=0).isoformat(timespec="seconds")
+
+
+def format_sheet_date(dt: datetime) -> str:
+    """ISO date YYYY-MM-DD for Sheets Engagement Date / Scrape Date columns."""
+    return _to_naive_utc(dt).date().isoformat()
