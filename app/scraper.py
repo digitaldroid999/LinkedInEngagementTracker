@@ -378,8 +378,14 @@ class EngagementScraper:
         self._stats.errors.append(message)
         _log.error("%s", message)
 
-    def _increment_api_calls(self) -> None:
+    def _on_successful_api_call(self, method: str, url: str) -> None:
         self._api_calls += 1
+        _log.info(
+            "Successful API call (profile=%s): %s %s",
+            self._current_label or "(unknown)",
+            method,
+            url,
+        )
 
     def _emit(self) -> None:
         if self._progress_cb:
@@ -848,7 +854,7 @@ class EngagementScraper:
         util_sheet_row: int | None = None,
     ) -> None:
         self._api_calls = 0
-        self._api.set_api_call_hook(self._increment_api_calls)
+        self._api.set_api_call_hook(self._on_successful_api_call)
         util_row_holder: list[int | None] = [util_sheet_row]
         try:
             self._scrape_profile_body(

@@ -145,6 +145,8 @@ class MainWindow(QWidget):
             self.setWindowIcon(QIcon(str(ip)))
         self._load_settings_ui()
         self._refresh_profile_count()
+        log_path = begin_scrape_session()
+        _log.info("Application started; log file: %s", log_path)
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._on_timer)
         self._timer.start(1000)

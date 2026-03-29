@@ -59,7 +59,7 @@ class LinkedInAPIClient:
         self._key = rapidapi_key
         self._max_retries = max_retries
         self._timeout = timeout
-        self._on_api_call: Callable[[], None] | None = None
+        self._on_api_call: Callable[[str, str], None] | None = None
         self._session = requests.Session()
         self._session.headers.update(
             {
@@ -82,8 +82,9 @@ class LinkedInAPIClient:
                     raise LinkedInAPIError("Invalid JSON (not an object)")
                 if js.get("success") is False and "message" in js:
                     raise LinkedInAPIError(str(js.get("message")))
+                # Count and log only after a successful response; failed attempts retry without hook.
                 if self._on_api_call is not None:
-                    self._on_api_call()
+                    self._on_api_call(method, resp.url)
                 return js
             except (requests.RequestException, LinkedInAPIError, ValueError) as e:
                 last_err = e
@@ -108,8 +109,8 @@ class LinkedInAPIClient:
         assert last_err is not None
         raise last_err
 
-    def set_api_call_hook(self, hook: Callable[[], None] | None) -> None:
-        """Invoked once after each successful HTTP response (one count per page for paginated endpoints)."""
+    def set_api_call_hook(self, hook: Callable[[str, str], None] | None) -> None:
+        """Invoked once per successful API response with (method, url); retries do not invoke the hook."""
         self._on_api_call = hook
 
     def get_profile_by_username(self, username: str) -> dict[str, Any]:
