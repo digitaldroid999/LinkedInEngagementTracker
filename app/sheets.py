@@ -254,8 +254,7 @@ class SheetsManager:
     ) -> tuple[set[str], dict[str, int], dict[str, dict[str, str]]]:
         """
         Scan Profiles_Engagement_Util: normalized profile URL keys, 1-based sheet row per key,
-        and per-row fields used as scrape state (urn, last_commented, last_reacted_post_id,
-        number_of_api_calls).
+        and per-row fields used as scrape state (urn, last_commented, last_reacted_post_id).
         """
         ws = self.profiles_engagement_util_ws()
         rows = ws.get_all_values(value_render_option="FORMULA")
@@ -281,7 +280,6 @@ class SheetsManager:
         i_urn = col_idx("urn")
         i_lc = col_idx("last commented date")
         i_lr = col_idx("last reacted post id")
-        i_api = col_idx("number of api calls")
 
         keys: set[str] = set()
         row_by_key: dict[str, int] = {}
@@ -304,8 +302,6 @@ class SheetsManager:
                 fd["last_commented"] = self._cell_str(r, i_lc)
             if i_lr is not None:
                 fd["last_reacted_post_id"] = self._cell_str(r, i_lr)
-            if i_api is not None:
-                fd["number_of_api_calls"] = self._cell_str(r, i_api)
             fields_by_key[k] = fd
         return keys, row_by_key, fields_by_key
 

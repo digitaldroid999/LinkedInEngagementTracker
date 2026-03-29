@@ -26,19 +26,6 @@ def linkedin_username_from_url(url: str) -> str | None:
     return m.group(1).strip().rstrip("/")
 
 
-def _parse_prior_api_call_count(value: Any) -> int:
-    """Parse existing Number of API calls cell; non-numeric or empty → 0."""
-    if value is None:
-        return 0
-    s = str(value).strip()
-    if not s:
-        return 0
-    try:
-        return int(float(s))
-    except ValueError:
-        return 0
-
-
 def _get_post_and_author(item: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     post = item.get("post")
     if not isinstance(post, dict):
@@ -872,10 +859,8 @@ class EngagementScraper:
             ur = util_row_holder[0]
             if ur is not None:
                 try:
-                    prior = _parse_prior_api_call_count(pinfo.get("number_of_api_calls"))
-                    total_calls = prior + self._api_calls
                     self._sheets.update_engagement_util_cell(
-                        ur, "Number of API calls", str(total_calls)
+                        ur, "Number of API calls", str(self._api_calls)
                     )
                 except Exception as e:
                     _log.warning("Could not write Number of API calls for row %s: %s", ur, e)
